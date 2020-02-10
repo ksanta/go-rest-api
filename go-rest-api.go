@@ -5,18 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/ksanta/go-rest-api/domain"
 	_ "github.com/lib/pq"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
 )
-
-type event struct {
-	ID          int    `json:"ID"`
-	Title       string `json:"Title"`
-	Description string `json:"Description"`
-}
 
 var db *sql.DB
 
@@ -25,7 +20,7 @@ func homeLink(w http.ResponseWriter, _ *http.Request) {
 }
 
 func createEvent(w http.ResponseWriter, r *http.Request) {
-	var newEvent event
+	var newEvent domain.Event
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -60,7 +55,7 @@ func getOneEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Query from database
 	row := db.QueryRow("SELECT id, title, description FROM events where id = $1", eventID)
-	event := event{}
+	event := domain.Event{}
 	err := row.Scan(&event.ID, &event.Title, &event.Description)
 	if err == sql.ErrNoRows {
 		http.NotFound(w, r)
@@ -80,9 +75,9 @@ func getAllEvents(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	// Load results into an events slice
-	events := make([]event, 0)
+	events := make([]domain.Event, 0)
 	for rows.Next() {
-		event := event{}
+		event := domain.Event{}
 		err = rows.Scan(&event.ID, &event.Title, &event.Description)
 		if err != nil {
 			log.Fatal(err)
@@ -102,7 +97,7 @@ func updateEvent(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Kindly enter data with the event title and description only in order to update")
 	}
 
-	var updatedEvent event
+	var updatedEvent domain.Event
 	json.Unmarshal(reqBody, &updatedEvent)
 	updatedEvent.ID, _ = strconv.Atoi(eventID)
 
