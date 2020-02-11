@@ -1,19 +1,18 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/ksanta/go-rest-api/domain"
-	_ "github.com/lib/pq"
+	"github.com/ksanta/go-rest-api/repository"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
 )
 
-var db *sql.DB
+var repo repository.EventRepository
 
 func homeLink(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "Welcome! /events resource is available")
@@ -37,31 +36,32 @@ func createEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Title and description must be populated", http.StatusBadRequest)
 	}
 
-	result, err := db.Exec("insert into events (title, description) VALUES ($1, $2)", newEvent.Title, newEvent.Description)
+	err = repo.Create(&newEvent)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	lastInsertId, _ := result.LastInsertId()
-	newEvent.ID = int(lastInsertId)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(newEvent)
 }
 
 func getOneEvent(w http.ResponseWriter, r *http.Request) {
-	eventID := mux.Vars(r)["id"]
+	eventId := mux.Vars(r)["id"]
 
-	// Query from database
-	row := db.QueryRow("SELECT id, title, description FROM events where id = $1", eventID)
-	event := domain.Event{}
-	err := row.Scan(&event.ID, &event.Title, &event.Description)
-	if err == sql.ErrNoRows {
+	eventIdInt, err := strconv.Atoi(eventId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	event, err := repo.GetById(eventIdInt)
+	if event == nil && err == nil {
 		http.NotFound(w, r)
 		return
 	} else if err != nil {
-		log.Fatal(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Marshall event and write to response
@@ -69,24 +69,14 @@ func getOneEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAllEvents(w http.ResponseWriter, r *http.Request) {
-	// Query from database
-	rows, err := db.Query("SELECT id, title, description FROM events")
+	events, err := repo.GetAll()
 	if err != nil {
-		log.Fatal(err)
-	}
-	// Load results into an events slice
-	events := make([]domain.Event, 0)
-	for rows.Next() {
-		event := domain.Event{}
-		err = rows.Scan(&event.ID, &event.Title, &event.Description)
-		if err != nil {
-			log.Fatal(err)
-		}
-		events = append(events, event)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Marshall event and write to response
-	json.NewEncoder(w).Encode(events)
+	json.NewEncoder(w).Encode(*events)
 }
 
 func updateEvent(w http.ResponseWriter, r *http.Request) {
@@ -101,10 +91,9 @@ func updateEvent(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(reqBody, &updatedEvent)
 	updatedEvent.ID, _ = strconv.Atoi(eventID)
 
-	_, err = db.Exec("update events set title = $2, description = $3 where id = $1", updatedEvent.ID, updatedEvent.Title, updatedEvent.Description)
+	err = repo.Update(&updatedEvent)
 	if err != nil {
-		w.Write([]byte("Error updating an existing event"))
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -113,26 +102,22 @@ func updateEvent(w http.ResponseWriter, r *http.Request) {
 
 func deleteEvent(w http.ResponseWriter, r *http.Request) {
 	eventID := mux.Vars(r)["id"]
+	eventIdInt, _ := strconv.Atoi(eventID)
 
-	_, err := db.Exec("delete from events where id = $1", eventID)
+	err := repo.Delete(eventIdInt)
 	if err != nil {
-		w.Write([]byte("Error deleting an existing event"))
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-func initialiseDatabaseConnection() {
-	connStr := "user=postgres password=password dbname=postgres sslmode=disable"
+func main() {
 	var err error
-	db, err = sql.Open("postgres", connStr)
+	repo, err = repository.NewPostgresEventRepo()
 	if err != nil {
 		log.Fatal(err)
 	}
-}
 
-func main() {
-	initialiseDatabaseConnection()
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/", homeLink)
 	router.HandleFunc("/events", createEvent).Methods("POST")
