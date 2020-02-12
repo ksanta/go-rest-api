@@ -12,18 +12,37 @@ import (
 	"strconv"
 )
 
+func main() {
+	var err error
+	repo, err = repository.NewPostgresEventRepo()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	router := mux.NewRouter().StrictSlash(true)
+	router.HandleFunc("/", welcomePage)
+	router.HandleFunc("/events", createEvent).Methods("POST")
+	router.HandleFunc("/events", getAllEvents).Methods("GET")
+	router.HandleFunc("/events/{id}", getOneEvent).Methods("GET")
+	router.HandleFunc("/events/{id}", updateEvent).Methods("PATCH")
+	router.HandleFunc("/events/{id}", deleteEvent).Methods("DELETE")
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
 var repo repository.EventRepository
 
-func homeLink(w http.ResponseWriter, _ *http.Request) {
-	fmt.Fprintf(w, "Welcome! /events resource is available")
+func welcomePage(w http.ResponseWriter, _ *http.Request) {
+	_, err := fmt.Fprintf(w, "Welcome! /events resource is available")
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func createEvent(w http.ResponseWriter, r *http.Request) {
 	var newEvent domain.Event
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		log.Fatal(err)
 	}
 
 	err = json.Unmarshal(reqBody, &newEvent)
@@ -32,8 +51,8 @@ func createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if newEvent.Title == "" || newEvent.Description == "" {
-		http.Error(w, "Title and description must be populated", http.StatusBadRequest)
+	if err = newEvent.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
 	err = repo.Create(&newEvent)
@@ -43,7 +62,10 @@ func createEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newEvent)
+	err = json.NewEncoder(w).Encode(newEvent)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func getOneEvent(w http.ResponseWriter, r *http.Request) {
@@ -65,10 +87,13 @@ func getOneEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Marshall event and write to response
-	json.NewEncoder(w).Encode(event)
+	err = json.NewEncoder(w).Encode(event)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
-func getAllEvents(w http.ResponseWriter, r *http.Request) {
+func getAllEvents(w http.ResponseWriter, _ *http.Request) {
 	events, err := repo.GetAll()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -76,7 +101,10 @@ func getAllEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Marshall event and write to response
-	json.NewEncoder(w).Encode(*events)
+	err = json.NewEncoder(w).Encode(*events)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func updateEvent(w http.ResponseWriter, r *http.Request) {
@@ -84,12 +112,22 @@ func updateEvent(w http.ResponseWriter, r *http.Request) {
 
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(w, "Kindly enter data with the event title and description only in order to update")
+		log.Fatal(err)
 	}
 
 	var updatedEvent domain.Event
-	json.Unmarshal(reqBody, &updatedEvent)
-	updatedEvent.ID, _ = strconv.Atoi(eventID)
+	err = json.Unmarshal(reqBody, &updatedEvent)
+	if err != nil {
+		http.Error(w, "Please put an event object in the request body", http.StatusBadRequest)
+		return
+	}
+
+	updatedEvent.ID, err = strconv.Atoi(eventID)
+	if err != nil {
+		http.Error(w, "ID is not a valid integer", http.StatusBadRequest)
+	}
+
+	// todo: validate to see if the data already exists
 
 	err = repo.Update(&updatedEvent)
 	if err != nil {
@@ -97,7 +135,10 @@ func updateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(updatedEvent)
+	err = json.NewEncoder(w).Encode(updatedEvent)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func deleteEvent(w http.ResponseWriter, r *http.Request) {
@@ -109,21 +150,4 @@ func deleteEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-}
-
-func main() {
-	var err error
-	repo, err = repository.NewPostgresEventRepo()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/", homeLink)
-	router.HandleFunc("/events", createEvent).Methods("POST")
-	router.HandleFunc("/events", getAllEvents).Methods("GET")
-	router.HandleFunc("/events/{id}", getOneEvent).Methods("GET")
-	router.HandleFunc("/events/{id}", updateEvent).Methods("PATCH")
-	router.HandleFunc("/events/{id}", deleteEvent).Methods("DELETE")
-	log.Fatal(http.ListenAndServe(":8080", router))
 }

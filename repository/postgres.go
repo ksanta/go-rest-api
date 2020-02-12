@@ -33,6 +33,7 @@ func (e eventRepoImpl) Create(event *domain.Event) error {
 		return err
 	}
 
+	// todo: LastInsertId() is not supported by the Postgres driver
 	lastInsertId, err := result.LastInsertId()
 	if err != nil {
 		return err
